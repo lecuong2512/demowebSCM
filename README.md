@@ -1,12 +1,12 @@
 # 📖 Hướng Dẫn Chạy Dự Án SCM System
 
 ## 📋 Mục Lục
-1. [Yêu Cầu Hệ Thống](#yêu-cầu-hệ-thống)
-2. [Cài Đặt Dependencies](#cài-đặt-dependencies)
-3. [Chạy Dự Án](#chạy-dự-án)
-4. [Cấu Trúc Dự Án](#cấu-trúc-dự-án)
-5. [Thông Tin Đăng Nhập](#thông-tin-đăng-nhập)
-6. [Troubleshooting](#troubleshooting)
+1. [Yêu Cầu Hệ Thống](##yêu-cầu-hệ-thống)
+2. [Cài Đặt Dependencies](##cài-đặt-dependencies)
+3. [Chạy Dự Án](##chạy-dự-án)
+4. [Cấu Trúc Dự Án](##cấu-trúc-dự-án)
+5. [Thông Tin Đăng Nhập](##thông-tin-đăng-nhập)
+6. [Troubleshooting](##troubleshooting)
 
 ---
 
