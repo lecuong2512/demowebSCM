@@ -1,112 +1,85 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { api, saveToken, removeToken, type User } from '../services/api';
 
 export type UserRole = 'admin' | 'purchasing' | 'warehouse' | 'finance' | 'manager';
-
-export interface User {
-  id: string;
-  username: string;
-  fullName: string;
-  role: UserRole;
-  email: string;
-}
+export type { User };
 
 interface AuthContextType {
   user: User | null;
   login: (username: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   isAuthenticated: boolean;
+  /** Lưu tên + avatar lên server (SQLite) — đổi ảnh mới sẽ ghi đè ảnh cũ trong DB */
+  updateProfile: (updates: { fullName?: string; avatarUrl?: string | null }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Mock users data
-const mockUsers: Record<string, { password: string; user: User }> = {
-  admin: {
-    password: 'admin123',
-    user: {
-      id: '1',
-      username: 'admin',
-      fullName: 'Lê Văn An',
-      role: 'admin',
-      email: 'admin@mwg.vn'
-    }
-  },
-  purchasing: {
-    password: 'pur123',
-    user: {
-      id: '2',
-      username: 'purchasing',
-      fullName: 'Lê Hoàng Hà',
-      role: 'purchasing',
-      email: 'purchasing@mwg.vn'
-    }
-  },
-  warehouse: {
-    password: 'wh123',
-    user: {
-      id: '3',
-      username: 'warehouse',
-      fullName: 'Đặng Hữu Hiệp',
-      role: 'warehouse',
-      email: 'warehouse@mwg.vn'
-    }
-  },
-  finance: {
-    password: 'fin123',
-    user: {
-      id: '4',
-      username: 'finance',
-      fullName: 'Bùi Đình Tuấn',
-      role: 'finance',
-      email: 'finance@mwg.vn'
-    }
-  },
-  manager: {
-    password: 'mgr123',
-    user: {
-      id: '5',
-      username: 'manager',
-      fullName: 'Lê Việt Cường',
-      role: 'manager',
-      email: 'manager@mwg.vn'
-    }
-  }
-};
-
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
-    // Check if user is stored in localStorage
-    const storedUser = localStorage.getItem('scm_user');
-    return storedUser ? JSON.parse(storedUser) : null;
+    const stored = localStorage.getItem('scm_user');
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored) as User;
+    } catch {
+      return null;
+    }
   });
 
+  /** Đồng bộ hồ sơ từ DB khi còn token (F5 hoặc mở lại tab) */
+  useEffect(() => {
+    const tok = localStorage.getItem('scm_auth_token');
+    if (!tok) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const u = await api.users.me.get();
+        if (cancelled) return;
+        setUser(u);
+        localStorage.setItem('scm_user', JSON.stringify(u));
+      } catch {
+        if (cancelled) return;
+        setUser(null);
+        removeToken();
+        localStorage.removeItem('scm_user');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const login = async (username: string, password: string): Promise<{ success: boolean; error?: string }> => {
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    const userCredentials = mockUsers[username.toLowerCase()];
-    
-    if (!userCredentials) {
-      return { success: false, error: 'Tên đăng nhập không tồn tại' };
+    try {
+      const result = await api.auth.login(username, password);
+      setUser(result.user);
+      saveToken(result.token);
+      localStorage.setItem('scm_user', JSON.stringify(result.user));
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Đăng nhập thất bại' };
     }
-
-    if (userCredentials.password !== password) {
-      return { success: false, error: 'Mật khẩu không chính xác' };
-    }
-
-    // Login successful
-    setUser(userCredentials.user);
-    localStorage.setItem('scm_user', JSON.stringify(userCredentials.user));
-    return { success: true };
   };
 
   const logout = () => {
     setUser(null);
+    removeToken();
     localStorage.removeItem('scm_user');
+    localStorage.removeItem('scm_local_profile');
+  };
+
+  const updateProfile = async (updates: { fullName?: string; avatarUrl?: string | null }) => {
+    const body: { fullName?: string; avatarUrl?: string | null } = {};
+    if (updates.fullName !== undefined) body.fullName = updates.fullName.trim();
+    if (updates.avatarUrl !== undefined) body.avatarUrl = updates.avatarUrl;
+    if (Object.keys(body).length === 0) return;
+    const next = await api.users.me.patch(body);
+    setUser(next);
+    localStorage.setItem('scm_user', JSON.stringify(next));
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user, updateProfile }}>
       {children}
     </AuthContext.Provider>
   );
@@ -114,8 +87,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

@@ -1,236 +1,153 @@
-import React, { useState } from 'react';
-import { ClipboardList, Search, Filter, User, FileText, Settings, ShoppingCart } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { api, type AuditLog } from '../services/api';
+import { ClipboardList, Search, User, FileText, Settings, ShoppingCart, Package, DollarSign, RefreshCw } from 'lucide-react';
+
+const CATEGORY_META: Record<string, { label: string; color: string; icon: any }> = {
+  pr:       { label: 'Yêu cầu mua', color: 'bg-blue-100 text-blue-700', icon: FileText },
+  approval: { label: 'Phê duyệt',   color: 'bg-green-100 text-green-700', icon: FileText },
+  po:       { label: 'Đặt hàng',    color: 'bg-purple-100 text-purple-700', icon: ShoppingCart },
+  warehouse:{ label: 'Kho vận',     color: 'bg-orange-100 text-orange-700', icon: Package },
+  finance:  { label: 'Tài chính',   color: 'bg-yellow-100 text-yellow-700', icon: DollarSign },
+  system:   { label: 'Hệ thống',    color: 'bg-gray-100 text-gray-700', icon: Settings },
+  vendor:   { label: 'Nhà cung cấp',color: 'bg-pink-100 text-pink-700', icon: User },
+};
 
 export default function AuditLog() {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [actionFilter, setActionFilter] = useState('all');
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all');
 
-  const auditLogs = [
-    {
-      id: 'LOG001',
-      timestamp: '2026-02-05 14:32:15',
-      user: 'Lê Hoàng Hà',
-      userId: 'purchasing',
-      action: 'CREATE_PR',
-      actionLabel: 'Tạo yêu cầu mua hàng',
-      details: 'Tạo PR003 - MacBook Air M3 15 inch (30 chiếc)',
-      ipAddress: '192.168.1.105',
-      category: 'pr'
-    },
-    {
-      id: 'LOG002',
-      timestamp: '2026-02-05 10:15:42',
-      user: 'Lê Việt Cường',
-      userId: 'manager',
-      action: 'APPROVE_PR',
-      actionLabel: 'Duyệt yêu cầu',
-      details: 'Duyệt PR001 - iPhone 15 Pro Max (50 chiếc)',
-      ipAddress: '192.168.1.102',
-      category: 'approval'
-    },
-    {
-      id: 'LOG003',
-      timestamp: '2026-02-04 16:45:30',
-      user: 'Đặng Hữu Hiệp',
-      userId: 'warehouse',
-      action: 'CREATE_GRN',
-      actionLabel: 'Tạo phiếu nhập kho',
-      details: 'Nhập kho GRN045 từ PO001 (50/50 chiếc)',
-      ipAddress: '192.168.1.108',
-      category: 'warehouse'
-    },
-    {
-      id: 'LOG004',
-      timestamp: '2026-02-04 11:20:18',
-      user: 'Bùi Đình Tuấn',
-      userId: 'finance',
-      action: 'RECONCILE',
-      actionLabel: 'Đối soát',
-      details: 'Đối soát REC001: PO001 - GRN045 - INV234',
-      ipAddress: '192.168.1.110',
-      category: 'finance'
-    },
-    {
-      id: 'LOG005',
-      timestamp: '2026-02-03 09:30:05',
-      user: 'Lê Hoàng Hà',
-      userId: 'purchasing',
-      action: 'CREATE_PO',
-      actionLabel: 'Tạo đơn đặt hàng',
-      details: 'Tạo PO003 cho PR007 - Dell XPS 15',
-      ipAddress: '192.168.1.105',
-      category: 'po'
-    },
-    {
-      id: 'LOG006',
-      timestamp: '2026-02-02 15:45:22',
-      user: 'Lê Việt Cường',
-      userId: 'manager',
-      action: 'REJECT_PR',
-      actionLabel: 'Từ chối yêu cầu',
-      details: 'Từ chối PR004 - Lý do: Số lượng quá cao',
-      ipAddress: '192.168.1.102',
-      category: 'approval'
-    },
-    {
-      id: 'LOG007',
-      timestamp: '2026-02-01 13:20:10',
-      user: 'Lê Văn An',
-      userId: 'admin',
-      action: 'UPDATE_VENDOR',
-      actionLabel: 'Cập nhật nhà cung cấp',
-      details: 'Cập nhật thông tin V001 - Apple Việt Nam',
-      ipAddress: '192.168.1.100',
-      category: 'vendor'
-    }
-  ];
+  const fetchLogs = async () => {
+    setLoading(true);
+    try {
+      const data = await api.auditLogs.list({
+        category: category !== 'all' ? category : undefined,
+        search: search || undefined,
+        limit: 200,
+      });
+      setLogs(data);
+    } catch (e: any) { console.error(e); }
+    finally { setLoading(false); }
+  };
 
-  const filteredLogs = auditLogs.filter(log => {
-    const matchesSearch = 
-      log.user.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.details.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.actionLabel.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesAction = actionFilter === 'all' || log.category === actionFilter;
-    return matchesSearch && matchesAction;
+  useEffect(() => { fetchLogs(); }, [category]);
+
+  const filteredLogs = logs.filter(log => {
+    if (!search) return true;
+    const s = search.toLowerCase();
+    return log.user_name.toLowerCase().includes(s) ||
+           log.details.toLowerCase().includes(s) ||
+           log.action_label.toLowerCase().includes(s) ||
+           log.id.toLowerCase().includes(s);
   });
 
-  const getCategoryIcon = (category: string) => {
-    switch (category) {
-      case 'pr': return <FileText className="w-5 h-5" />;
-      case 'approval': return <ClipboardList className="w-5 h-5" />;
-      case 'warehouse': return <ShoppingCart className="w-5 h-5" />;
-      case 'finance': return <Settings className="w-5 h-5" />;
-      case 'po': return <ShoppingCart className="w-5 h-5" />;
-      case 'vendor': return <User className="w-5 h-5" />;
-      default: return <ClipboardList className="w-5 h-5" />;
-    }
+  const getCategoryBadge = (cat: string) => {
+    const meta = CATEGORY_META[cat] || CATEGORY_META['system'];
+    const Icon = meta.icon;
+    return (
+      <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${meta.color}`}>
+        <Icon className="w-3 h-3" />{meta.label}
+      </span>
+    );
   };
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      pr: 'bg-blue-100 text-blue-600',
-      approval: 'bg-green-100 text-green-600',
-      warehouse: 'bg-purple-100 text-purple-600',
-      finance: 'bg-orange-100 text-orange-600',
-      po: 'bg-indigo-100 text-indigo-600',
-      vendor: 'bg-pink-100 text-pink-600'
-    };
-    return colors[category] || 'bg-gray-100 text-gray-600';
-  };
+  const categoryCounts = Object.keys(CATEGORY_META).reduce((acc, cat) => ({
+    ...acc,
+    [cat]: logs.filter(l => l.category === cat).length,
+  }), {} as Record<string, number>);
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl mb-1">Audit Log - Lịch sử Truy vết</h1>
-        <p className="text-gray-600">Theo dõi toàn bộ hoạt động trong hệ thống</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl mb-1">Nhật ký Hệ thống</h1>
+          <p className="text-gray-600">Lịch sử toàn bộ hoạt động trong hệ thống SCM</p>
+        </div>
+        <button onClick={fetchLogs} className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100">
+          <RefreshCw className="w-4 h-4" /> Làm mới
+        </button>
       </div>
 
-      {/* Info Card */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-        <h3 className="font-medium text-blue-900 mb-2">🔒 Audit Log đảm bảo tính minh bạch</h3>
-        <p className="text-sm text-blue-800">
-          Mọi thao tác quan trọng đều được ghi lại với đầy đủ thông tin: ai thực hiện, làm gì, khi nào, từ đâu. 
-          Dữ liệu này không thể bị chỉnh sửa sau khi tạo.
-        </p>
-      </div>
-
-      {/* Search & Filter */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Tìm kiếm theo người dùng, hành động..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <select
-            value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+      {/* Category filter chips */}
+      <div className="flex gap-2 flex-wrap">
+        <button
+          onClick={() => setCategory('all')}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${category === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+        >
+          Tất cả ({logs.length})
+        </button>
+        {Object.entries(CATEGORY_META).map(([cat, meta]) => (
+          <button
+            key={cat}
+            onClick={() => setCategory(cat)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              category === cat ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
           >
-            <option value="all">Tất cả hành động</option>
-            <option value="pr">Yêu cầu mua hàng</option>
-            <option value="approval">Duyệt yêu cầu</option>
-            <option value="po">Đơn đặt hàng</option>
-            <option value="warehouse">Kho vận</option>
-            <option value="finance">Tài chính</option>
-            <option value="vendor">Nhà cung cấp</option>
-          </select>
-        </div>
+            {meta.label} {categoryCounts[cat] > 0 && <span className="opacity-70">({categoryCounts[cat]})</span>}
+          </button>
+        ))}
       </div>
 
-      {/* Audit Log Table */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Thời gian</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Người dùng</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Hành động</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Chi tiết</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">IP Address</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredLogs.map((log) => (
-                <tr key={log.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {log.timestamp}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-                        <User className="w-4 h-4 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm">{log.user}</p>
-                        <p className="text-xs text-gray-500">{log.userId}</p>
-                      </div>
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+        <input
+          type="text"
+          placeholder="Tìm kiếm theo người dùng, hành động, chi tiết..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && fetchLogs()}
+          className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+        />
+      </div>
+
+      {loading ? (
+        <div className="text-center py-12"><RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto" /></div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ClipboardList className="w-5 h-5 text-gray-500" />
+              <span className="font-medium text-sm">Hiển thị {filteredLogs.length} bản ghi</span>
+            </div>
+          </div>
+
+          <div className="divide-y divide-gray-50">
+            {filteredLogs.map(log => (
+              <div key={log.id} className="p-4 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start gap-4">
+                  {/* Avatar */}
+                  <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <User className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-sm">{log.user_name}</span>
+                      {getCategoryBadge(log.category)}
+                      <span className="text-xs text-gray-400 font-mono">{log.id}</span>
                     </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm ${getCategoryColor(log.category)}`}>
-                      {getCategoryIcon(log.category)}
-                      {log.actionLabel}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    {log.details}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-600 font-mono">
-                    {log.ipAddress}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    <p className="text-sm font-medium text-gray-800 mt-0.5">{log.action_label}</p>
+                    <p className="text-sm text-gray-600 mt-0.5">{log.details}</p>
+                    <div className="flex items-center gap-4 mt-1.5 text-xs text-gray-400">
+                      <span>{log.timestamp}</span>
+                      {log.ip_address && <span>IP: {log.ip_address}</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
 
-      {/* Statistics */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-gray-600 text-sm mb-1">Tổng hoạt động</p>
-          <p className="text-3xl font-semibold text-blue-600">{auditLogs.length}</p>
+            {filteredLogs.length === 0 && (
+              <div className="p-12 text-center text-gray-400">
+                <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                <p>Không tìm thấy bản ghi nào</p>
+              </div>
+            )}
+          </div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-gray-600 text-sm mb-1">Người dùng hoạt động</p>
-          <p className="text-3xl font-semibold text-green-600">5</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-gray-600 text-sm mb-1">Hôm nay</p>
-          <p className="text-3xl font-semibold text-purple-600">12</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-          <p className="text-gray-600 text-sm mb-1">Tuần này</p>
-          <p className="text-3xl font-semibold text-orange-600">87</p>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

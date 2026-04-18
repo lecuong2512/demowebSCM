@@ -1,140 +1,151 @@
-import React, { useState } from 'react';
-import { mockPurchaseRequests, formatDate } from '../data/mockData';
-import { ClipboardList, Search, Filter, CheckCircle, XCircle, Clock, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { api, formatDate, type PurchaseRequest } from '../services/api';
+import { ClipboardList, Search, Filter, CheckCircle, XCircle, Clock, FileText, RefreshCw } from 'lucide-react';
 
 export default function PRTracking() {
+  const [prs, setPrs] = useState<PurchaseRequest[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const filteredPRs = mockPurchaseRequests.filter(pr => {
-    const matchesSearch = pr.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         pr.productName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || pr.status === statusFilter;
-    return matchesSearch && matchesStatus;
+  const fetchPRs = async () => {
+    setLoading(true);
+    try {
+      const data = await api.purchaseRequests.list();
+      setPrs(data);
+    } catch (e: any) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchPRs(); }, []);
+
+  const filtered = prs.filter(pr => {
+    const matchSearch = pr.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      pr.product_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      pr.created_by_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchStatus = statusFilter === 'all' || pr.status === statusFilter;
+    return matchSearch && matchStatus;
   });
 
   const getStatusBadge = (status: string) => {
-    const styles = {
-      draft: 'bg-gray-100 text-gray-700',
-      pending: 'bg-yellow-100 text-yellow-700',
-      approved: 'bg-green-100 text-green-700',
-      rejected: 'bg-red-100 text-red-700'
+    const map: Record<string, [string, string]> = {
+      draft:    ['bg-gray-100 text-gray-700', 'Nháp'],
+      pending:  ['bg-yellow-100 text-yellow-700', 'Chờ duyệt'],
+      approved: ['bg-green-100 text-green-700', 'Đã duyệt'],
+      rejected: ['bg-red-100 text-red-700', 'Từ chối'],
     };
-    const labels = {
-      draft: 'Nháp',
-      pending: 'Chờ duyệt',
-      approved: 'Đã duyệt',
-      rejected: 'Từ chối'
-    };
-    return (
-      <span className={`px-3 py-1 rounded-full text-sm ${styles[status as keyof typeof styles]}`}>
-        {labels[status as keyof typeof labels]}
-      </span>
-    );
+    const [cls, label] = map[status] || ['bg-gray-100 text-gray-700', status];
+    return <span className={`px-3 py-1 rounded-full text-sm ${cls}`}>{label}</span>;
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'approved': return <CheckCircle className="w-5 h-5 text-green-600" />;
       case 'rejected': return <XCircle className="w-5 h-5 text-red-600" />;
-      case 'pending': return <Clock className="w-5 h-5 text-yellow-600" />;
-      default: return <FileText className="w-5 h-5 text-gray-600" />;
+      case 'pending':  return <Clock className="w-5 h-5 text-yellow-600" />;
+      default:         return <FileText className="w-5 h-5 text-gray-600" />;
     }
+  };
+
+  const counts = {
+    total: prs.length,
+    pending: prs.filter(p => p.status === 'pending').length,
+    approved: prs.filter(p => p.status === 'approved').length,
+    rejected: prs.filter(p => p.status === 'rejected').length,
   };
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl mb-1">Theo dõi Yêu cầu Mua hàng</h1>
-        <p className="text-gray-600">Xem trạng thái và tiến trình xử lý các yêu cầu</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl mb-1">Theo dõi Yêu cầu Mua hàng</h1>
+          <p className="text-gray-600">Xem trạng thái và tiến trình xử lý các yêu cầu</p>
+        </div>
+        <button onClick={fetchPRs} className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm">
+          <RefreshCw className="w-4 h-4" /> Làm mới
+        </button>
       </div>
 
-      {/* Search & Filter */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Tìm kiếm theo mã PR hoặc tên sản phẩm..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+      {/* Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: 'Tổng yêu cầu', value: counts.total, color: 'blue' },
+          { label: 'Chờ duyệt', value: counts.pending, color: 'yellow' },
+          { label: 'Đã duyệt', value: counts.approved, color: 'green' },
+          { label: 'Từ chối', value: counts.rejected, color: 'red' },
+        ].map((s, i) => (
+          <div key={i} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 text-center">
+            <p className="text-gray-600 text-sm">{s.label}</p>
+            <p className={`text-3xl font-bold text-${s.color}-600`}>{s.value}</p>
           </div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">Tất cả trạng thái</option>
-            <option value="draft">Nháp</option>
-            <option value="pending">Chờ duyệt</option>
-            <option value="approved">Đã duyệt</option>
-            <option value="rejected">Từ chối</option>
-          </select>
-        </div>
+        ))}
       </div>
 
-      {/* PR List */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Mã PR</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Sản phẩm</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Số lượng</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Người tạo</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Ngày tạo</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Trạng thái</th>
-                <th className="px-6 py-3 text-left text-sm font-medium text-gray-700">Chi tiết</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredPRs.map((pr) => (
-                <tr key={pr.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <span className="font-medium text-blue-600">{pr.id}</span>
-                  </td>
-                  <td className="px-6 py-4">{pr.productName}</td>
-                  <td className="px-6 py-4">{pr.quantity}</td>
-                  <td className="px-6 py-4">{pr.createdBy}</td>
-                  <td className="px-6 py-4">{formatDate(pr.createdDate)}</td>
-                  <td className="px-6 py-4">{getStatusBadge(pr.status)}</td>
-                  <td className="px-6 py-4">
-                    <button className="text-blue-600 hover:text-blue-700">Xem</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Filters */}
+      <div className="flex gap-4 flex-wrap">
+        <div className="relative flex-1 min-w-48">
+          <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Tìm kiếm theo mã, sản phẩm, người tạo..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
         </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+        >
+          <option value="all">Tất cả trạng thái</option>
+          <option value="draft">Nháp</option>
+          <option value="pending">Chờ duyệt</option>
+          <option value="approved">Đã duyệt</option>
+          <option value="rejected">Từ chối</option>
+        </select>
       </div>
 
-      {/* Timeline for selected PR */}
-      {filteredPRs.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h3 className="font-semibold text-lg mb-4">Timeline tiến trình (Ví dụ: {filteredPRs[0].id})</h3>
-          <div className="space-y-4">
-            {[
-              { step: 'Tạo yêu cầu', date: filteredPRs[0].createdDate, status: 'completed' },
-              { step: 'Gửi duyệt', date: filteredPRs[0].createdDate, status: 'completed' },
-              { step: 'Đang chờ duyệt', date: '', status: filteredPRs[0].status === 'pending' ? 'current' : 'completed' },
-              { step: 'Hoàn tất', date: filteredPRs[0].approvedDate || '', status: filteredPRs[0].status === 'approved' ? 'completed' : 'pending' }
-            ].map((item, index) => (
-              <div key={index} className="flex items-start gap-4">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
-                  ${item.status === 'completed' ? 'bg-green-100' : item.status === 'current' ? 'bg-blue-100' : 'bg-gray-100'}`}
-                >
-                  {getStatusIcon(item.status === 'completed' ? 'approved' : item.status === 'current' ? 'pending' : 'draft')}
-                </div>
-                <div>
-                  <p className="font-medium">{item.step}</p>
-                  {item.date && <p className="text-sm text-gray-500">{formatDate(item.date)}</p>}
+      {loading ? (
+        <div className="text-center py-12"><RefreshCw className="w-8 h-8 animate-spin text-blue-500 mx-auto" /></div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+          <div className="p-4 border-b border-gray-100">
+            <p className="text-sm text-gray-500">Hiển thị {filtered.length} / {prs.length} yêu cầu</p>
+          </div>
+          <div className="divide-y divide-gray-50">
+            {filtered.map(pr => (
+              <div key={pr.id} className="p-4 hover:bg-gray-50 transition-colors">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3 flex-1">
+                    {getStatusIcon(pr.status)}
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono font-medium text-blue-600">{pr.id}</span>
+                        {getStatusBadge(pr.status)}
+                      </div>
+                      <p className="font-medium mt-1">{pr.product_name}</p>
+                      <p className="text-sm text-gray-600">{pr.reason}</p>
+                      <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                        <span>SL: <strong>{pr.quantity}</strong></span>
+                        <span>Tạo bởi: {pr.created_by_name}</span>
+                        <span>Ngày: {formatDate(pr.created_date)}</span>
+                        {pr.approved_by_name && <span>Duyệt bởi: {pr.approved_by_name}</span>}
+                      </div>
+                      {pr.rejection_reason && (
+                        <p className="text-xs text-red-600 mt-1">Lý do từ chối: {pr.rejection_reason}</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
+            {filtered.length === 0 && (
+              <div className="p-12 text-center text-gray-400">Không tìm thấy yêu cầu nào</div>
+            )}
           </div>
         </div>
       )}
