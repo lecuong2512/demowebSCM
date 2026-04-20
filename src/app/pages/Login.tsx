@@ -13,10 +13,10 @@ const QUICK_LOGINS = [
 
 const ROLE_REDIRECT: Record<string, string> = {
   admin:      '/dashboard',
-  purchasing: '/pr/create',
+  purchasing: '/pr/tracking',
   warehouse:  '/warehouse/receiving',
   finance:    '/finance/reconciliation',
-  manager:    '/pr/approval',
+  manager:    '/dashboard',
 };
 
 /** Ảnh nền (Vite: thư mục public/) */

@@ -13,7 +13,7 @@ import os
 import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'scm.db')
 JWT_SECRET = 'scm-secret-key-2026'
@@ -231,10 +231,13 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path.rstrip('/')
 
+        pr_match = re.match(r'^/api/purchase-requests/(\w+)$', path)
         vendor_match = re.match(r'^/api/vendors/(\w+)$', path)
         product_match = re.match(r'^/api/products/(\w+)$', path)
 
-        if vendor_match:
+        if pr_match:
+            self.update_pr(pr_match.group(1))
+        elif vendor_match:
             self.update_vendor(vendor_match.group(1))
         elif product_match:
             self.update_product(product_match.group(1))
@@ -365,6 +368,8 @@ class Handler(BaseHTTPRequestHandler):
         user = self.get_user()
         if not user:
             return self.send_error_json('Unauthorized', 401)
+        if user['role'] not in ('admin', 'manager'):
+            return self.send_error_json('Chỉ admin và quản lý mới có thể thêm nhà cung cấp', 403)
         body = self.get_body()
         vid = next_id('V', 'vendors')
         with get_db() as conn:
@@ -382,6 +387,8 @@ class Handler(BaseHTTPRequestHandler):
         user = self.get_user()
         if not user:
             return self.send_error_json('Unauthorized', 401)
+        if user['role'] not in ('admin', 'manager'):
+            return self.send_error_json('Chỉ admin và quản lý mới có thể chỉnh sửa nhà cung cấp', 403)
         body = self.get_body()
         with get_db() as conn:
             conn.execute("""UPDATE vendors SET name=?, contact_person=?, email=?,
@@ -390,6 +397,8 @@ class Handler(BaseHTTPRequestHandler):
                  body.get('phone'), body.get('address',''), body.get('notes',''), vid))
             conn.commit()
             row = conn.execute("SELECT * FROM vendors WHERE id=?", (vid,)).fetchone()
+        log_action(user['id'], user['fullName'], 'UPDATE_VENDOR', 'Cập nhật nhà cung cấp',
+                   f"Cập nhật vendor {vid} - {body.get('name')}", 'vendor')
         self.send_json(dict(row))
 
     # ─── Purchase Requests ──────────────────────────────────────────────────────
@@ -424,6 +433,8 @@ class Handler(BaseHTTPRequestHandler):
         user = self.get_user()
         if not user:
             return self.send_error_json('Unauthorized', 401)
+        if user['role'] == 'admin':
+            return self.send_error_json('Quản trị viên không thể tạo yêu cầu mua hàng', 403)
         body = self.get_body()
 
         # Validate
@@ -441,9 +452,30 @@ class Handler(BaseHTTPRequestHandler):
             if not product:
                 return self.send_error_json('Sản phẩm không tồn tại')
 
-            # AI suggestion: deficit + 30% buffer
+            # AI suggestion: deficit + 30% buffer + trend analysis
             deficit = max(0, product['min_stock'] - product['current_stock'])
-            ai_suggestion = max(deficit + int(product['min_stock'] * 0.3), 10)
+
+            # Calculate purchase trend (average monthly consumption over last 3 months)
+            three_months_ago = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+            trend_rows = conn.execute("""
+                SELECT SUM(gr.received_quantity) as monthly_total, strftime('%Y-%m', gr.received_date) as month
+                FROM goods_receipts gr
+                JOIN purchase_orders po ON gr.po_id = po.id
+                WHERE po.product_id = ? AND gr.received_date >= ?
+                GROUP BY strftime('%Y-%m', gr.received_date)
+                ORDER BY month DESC
+                LIMIT 3
+            """, (body['product_id'], three_months_ago)).fetchall()
+
+            avg_monthly_consumption = 0
+            if trend_rows:
+                total_consumption = sum(row['monthly_total'] for row in trend_rows)
+                avg_monthly_consumption = total_consumption / len(trend_rows)
+
+            # AI suggestion: deficit + 30% buffer + 1 month consumption + safety stock
+            safety_stock = max(product['min_stock'] * 0.5, 10)  # 50% of min stock or minimum 10
+            trend_buffer = avg_monthly_consumption * 0.3  # 30% of average monthly consumption
+            ai_suggestion = max(deficit + int(product['min_stock'] * 0.3) + int(trend_buffer) + int(safety_stock), 10)
 
             conn.execute("""INSERT INTO purchase_requests
                 (id,product_id,product_name,quantity,reason,current_stock,ai_suggestion,
@@ -478,6 +510,53 @@ class Handler(BaseHTTPRequestHandler):
                    f"Gửi {pr_id} - {pr['product_name']} lên duyệt", 'pr')
         self.send_json(dict(row))
 
+    def update_pr(self, pr_id):
+        user = self.get_user()
+        if not user:
+            return self.send_error_json('Unauthorized', 401)
+        if user['role'] == 'admin':
+            return self.send_error_json('Quản trị viên không thể chỉnh sửa yêu cầu mua hàng', 403)
+
+        body = self.get_body()
+        required = ['product_id', 'quantity', 'reason']
+        for f in required:
+            if not body.get(f):
+                return self.send_error_json(f'Thiếu trường: {f}')
+
+        with get_db() as conn:
+            pr = conn.execute("SELECT * FROM purchase_requests WHERE id=?", (pr_id,)).fetchone()
+            if not pr:
+                return self.send_error_json('PR not found', 404)
+            if pr['status'] != 'draft':
+                return self.send_error_json('Chỉ có thể chỉnh sửa yêu cầu ở trạng thái nháp')
+            if pr['created_by'] != user['id'] and user['role'] not in ('manager',):
+                return self.send_error_json('Bạn không có quyền chỉnh sửa nháp này', 403)
+
+            product = conn.execute("SELECT * FROM products WHERE id=?", (body['product_id'],)).fetchone()
+            if not product:
+                return self.send_error_json('Sản phẩm không tồn tại')
+
+            deficit = max(0, product['min_stock'] - product['current_stock'])
+            ai_suggestion = max(deficit + int(product['min_stock'] * 0.3), 10)
+            next_status = body.get('status', 'draft')
+            if next_status not in ('draft', 'pending'):
+                return self.send_error_json('Trạng thái không hợp lệ')
+
+            conn.execute("""UPDATE purchase_requests
+                SET product_id=?, product_name=?, quantity=?, reason=?, current_stock=?,
+                    ai_suggestion=?, status=?
+                WHERE id=?""",
+                (body['product_id'], product['name'], int(body['quantity']), body['reason'],
+                 product['current_stock'], ai_suggestion, next_status, pr_id))
+            conn.commit()
+            row = conn.execute("SELECT * FROM purchase_requests WHERE id=?", (pr_id,)).fetchone()
+
+        action = 'UPDATE_PR_DRAFT' if next_status == 'draft' else 'SUBMIT_PR'
+        label = 'Cập nhật yêu cầu nháp' if next_status == 'draft' else 'Gửi yêu cầu duyệt'
+        log_action(user['id'], user['fullName'], action, label,
+                   f"{action} {pr_id} - {row['product_name']} ({row['quantity']} chiếc)", 'pr')
+        self.send_json(dict(row))
+
     def approve_pr(self, pr_id):
         user = self.get_user()
         if not user:
@@ -496,6 +575,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_error_json('Chỉ có thể duyệt yêu cầu đang chờ')
 
             update_qty = body.get('adjusted_quantity') or pr['quantity']
+
+            # Unit price from body or product last price
+            product = conn.execute("SELECT * FROM products WHERE id=?", (pr['product_id'],)).fetchone()
+            unit_price = float(body.get('unit_price') or (product['last_price'] if product else 0))
+            total_amount = int(update_qty) * unit_price
+
+            # Approval authority rule by order value:
+            # - < 100M: manager/admin can approve
+            # - >= 100M: only admin can approve
+            if total_amount >= 100_000_000 and user['role'] != 'admin':
+                return self.send_error_json(
+                    'Đơn hàng từ 100.000.000 VNĐ trở lên cần phê duyệt bởi giám đốc (admin)',
+                    403
+                )
 
             # Update PR status
             conn.execute("""UPDATE purchase_requests 
@@ -520,15 +613,11 @@ class Handler(BaseHTTPRequestHandler):
             if not chosen_vendor:
                 chosen_vendor = conn.execute("SELECT * FROM vendors LIMIT 1").fetchone()
 
-            # Unit price from body or product last price
-            product = conn.execute("SELECT * FROM products WHERE id=?", (pr['product_id'],)).fetchone()
-            unit_price = float(body.get('unit_price') or (product['last_price'] if product else 0))
             delivery_days = int(body.get('delivery_days') or 7)
 
             po_id = next_id('PO', 'purchase_orders')
             from datetime import timedelta
             expected_delivery = (datetime.now() + timedelta(days=delivery_days)).strftime('%Y-%m-%d')
-            total_amount = int(update_qty) * unit_price
 
             conn.execute("""INSERT INTO purchase_orders
                 (id, pr_id, vendor_id, vendor_name, product_id, product_name, quantity,
@@ -543,7 +632,7 @@ class Handler(BaseHTTPRequestHandler):
             import random as _rnd
             carriers = [
                 'Viettel Post', 'GHTK', 'GHN Express', 'J&T Express',
-                'Ninja Van', 'Best Express', 'DHL Vietnam', 'FedEx Vietnam'
+                'Ninja Van', 'Best Express'
             ]
             carrier = _rnd.choice(carriers)
             tracking_num = 'TK' + str(_rnd.randint(100000000, 999999999))
@@ -797,8 +886,9 @@ class Handler(BaseHTTPRequestHandler):
                     COUNT(*) as orders
                 FROM purchase_orders
                 WHERE order_date >= date('now', '-6 months')
+                  AND status != 'cancelled'
                 GROUP BY strftime('%Y-%m', order_date)
-                ORDER BY order_date
+                ORDER BY strftime('%Y-%m', order_date)
             """).fetchall()
 
             # Category distribution
@@ -806,6 +896,7 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT p.category, COUNT(*) as value
                 FROM purchase_orders po
                 JOIN products p ON po.product_id = p.id
+                WHERE po.status != 'cancelled'
                 GROUP BY p.category
                 ORDER BY value DESC
             """).fetchall()
@@ -814,6 +905,7 @@ class Handler(BaseHTTPRequestHandler):
             top_vendors = conn.execute("""
                 SELECT vendor_name as name, SUM(total_amount) as amount
                 FROM purchase_orders
+                WHERE status != 'cancelled'
                 GROUP BY vendor_id
                 ORDER BY amount DESC
                 LIMIT 5

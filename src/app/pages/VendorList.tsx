@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { api, type Vendor } from '../services/api';
-import { Users, Star, Mail, Phone, MapPin, Award, Search, ChevronRight, RefreshCw, Plus, X } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { Users, Star, Mail, Phone, MapPin, Award, Search, ChevronRight, RefreshCw, Plus, X, Lock } from 'lucide-react';
 import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts';
 
 export default function VendorList() {
+  const { user } = useAuth();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [selected, setSelected] = useState<Vendor | null>(null);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
   const [form, setForm] = useState({ name: '', contact_person: '', email: '', phone: '', address: '', tax_code: '' });
+  const [editForm, setEditForm] = useState({ name: '', contact_person: '', email: '', phone: '', address: '' });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -42,6 +46,10 @@ export default function VendorList() {
   ] : [];
 
   const handleAddVendor = async () => {
+    if (!user || !['admin', 'manager'].includes(user.role)) {
+      setMsg('Chỉ admin và quản lý mới có thể thêm nhà cung cấp');
+      return;
+    }
     if (!form.name || !form.contact_person || !form.email || !form.phone) {
       setMsg('Vui lòng điền đầy đủ thông tin bắt buộc'); return;
     }
@@ -56,6 +64,41 @@ export default function VendorList() {
     finally { setSaving(false); }
   };
 
+  const canAddVendor = user && ['admin', 'manager'].includes(user.role);
+  const canManageVendor = user && ['admin', 'manager'].includes(user.role);
+
+  const openEditModal = () => {
+    if (!selected) return;
+    setEditForm({
+      name: selected.name || '',
+      contact_person: selected.contact_person || '',
+      email: selected.email || '',
+      phone: selected.phone || '',
+      address: selected.address || '',
+    });
+    setShowEdit(true);
+  };
+
+  const handleEditVendor = async () => {
+    if (!selected) return;
+    if (!editForm.name || !editForm.contact_person || !editForm.email || !editForm.phone) {
+      setMsg('Vui lòng điền đầy đủ thông tin bắt buộc');
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.vendors.update(selected.id, editForm);
+      setVendors((prev) => prev.map((v) => (v.id === selected.id ? updated : v)));
+      setSelected(updated);
+      setMsg('Đã cập nhật nhà cung cấp thành công!');
+      setShowEdit(false);
+    } catch (e: any) {
+      setMsg(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -67,9 +110,15 @@ export default function VendorList() {
           <button onClick={fetchVendors} className="flex items-center gap-2 px-4 py-2 bg-gray-50 text-gray-700 rounded-lg text-sm hover:bg-gray-100">
             <RefreshCw className="w-4 h-4" />
           </button>
-          <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
-            <Plus className="w-4 h-4" /> Thêm NCC
-          </button>
+          {canAddVendor ? (
+            <button onClick={() => setShowAdd(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm">
+              <Plus className="w-4 h-4" /> Thêm NCC
+            </button>
+          ) : (
+            <button disabled className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-500 rounded-lg text-sm cursor-not-allowed">
+              <Lock className="w-4 h-4" /> Thêm NCC
+            </button>
+          )}
         </div>
       </div>
 
@@ -113,6 +162,43 @@ export default function VendorList() {
         </div>
       )}
 
+      {/* Edit Vendor Modal */}
+      {showEdit && selected && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl p-6 w-full max-w-lg">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-lg">Chỉnh sửa nhà cung cấp</h3>
+              <button onClick={() => setShowEdit(false)}><X className="w-5 h-5" /></button>
+            </div>
+            <div className="space-y-3">
+              {[
+                ['Tên công ty *', 'name'],
+                ['Người liên hệ *', 'contact_person'],
+                ['Email *', 'email'],
+                ['Điện thoại *', 'phone'],
+                ['Địa chỉ', 'address'],
+              ].map(([label, field]) => (
+                <div key={field}>
+                  <label className="block text-sm font-medium mb-1">{label}</label>
+                  <input
+                    type="text"
+                    value={(editForm as any)[field]}
+                    onChange={(e) => setEditForm(f => ({ ...f, [field]: e.target.value }))}
+                    className="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={() => setShowEdit(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm">Huỷ</button>
+              <button onClick={handleEditVendor} disabled={saving} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+                {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
@@ -143,7 +229,7 @@ export default function VendorList() {
           {loading ? (
             <div className="p-8 text-center"><RefreshCw className="w-6 h-6 animate-spin text-blue-500 mx-auto" /></div>
           ) : (
-            <div className="divide-y divide-gray-50">
+            <div className="divide-y divide-gray-50 max-h-[560px] overflow-y-auto">
               {filtered.map(v => (
                 <button key={v.id} onClick={() => setSelected(v)}
                   className={`w-full text-left p-4 hover:bg-blue-50 transition-colors ${selected?.id === v.id ? 'bg-blue-50' : ''}`}>
@@ -169,7 +255,17 @@ export default function VendorList() {
                   <h3 className="font-bold text-xl">{selected.name}</h3>
                   <div className="flex items-center gap-1 mt-1">{renderStars(selected.rating)}<span className="text-sm text-gray-600 ml-1">{selected.rating}/5</span></div>
                 </div>
-                <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">Hoạt động</span>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">Hoạt động</span>
+                  {canManageVendor && (
+                    <button
+                      onClick={openEditModal}
+                      className="px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100"
+                    >
+                      Chỉnh sửa
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div className="flex items-center gap-2 text-gray-600"><Users className="w-4 h-4" />{selected.contact_person}</div>

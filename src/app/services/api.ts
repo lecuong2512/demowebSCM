@@ -75,6 +75,8 @@ export const api = {
     get: (id: string) => request<PurchaseRequest>(`/purchase-requests/${id}`),
     create: (data: CreatePRData) =>
       request<PurchaseRequest>('/purchase-requests', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: CreatePRData) =>
+      request<PurchaseRequest>(`/purchase-requests/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
     submit: (id: string) =>
       request<PurchaseRequest>(`/purchase-requests/${id}/submit`, { method: 'PATCH' }),
     approve: (id: string, data: ApproveData) =>

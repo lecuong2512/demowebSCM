@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -40,6 +41,7 @@ const chartEnter = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
   const [prs, setPRs] = useState<PurchaseRequest[]>([]);
@@ -49,7 +51,10 @@ export default function Dashboard() {
   const [chartAnimKey, setChartAnimKey] = useState(0);
 
   const fetchAll = async () => {
-    setLoading(true); setError('');
+    if (!stats) {
+      setLoading(true);
+    }
+    setError('');
     try {
       const [s, poData, prData] = await Promise.all([
         api.dashboard.stats(),
@@ -59,7 +64,9 @@ export default function Dashboard() {
       setStats(s); setPOs(poData); setPRs(prData);
       setChartAnimKey((k) => k + 1);
     } catch (e: any) { setError(e.message); }
-    finally { setLoading(false); }
+    finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -85,6 +92,8 @@ export default function Dashboard() {
   if (!stats) return null;
 
   // Derived metrics
+  const activePOs = pos.filter((p) => p.status !== 'cancelled');
+  const reviewedPRs = prs.filter((p) => p.status !== 'draft');
   const poStatusCounts = {
     pending: pos.filter(p => p.status === 'pending').length,
     confirmed: pos.filter(p => p.status === 'confirmed').length,
@@ -98,10 +107,10 @@ export default function Dashboard() {
     approved: prs.filter(p => p.status === 'approved').length,
     rejected: prs.filter(p => p.status === 'rejected').length,
   };
-  const fulfillmentRate = pos.length > 0
-    ? Math.round((poStatusCounts.delivered / pos.length) * 100) : 0;
-  const approvalRate = prs.length > 0
-    ? Math.round(((prStatusCounts.approved) / prs.filter(p => p.status !== 'draft').length) * 100) : 0;
+  const fulfillmentRate = activePOs.length > 0
+    ? Math.round((poStatusCounts.delivered / activePOs.length) * 100) : 0;
+  const approvalRate = reviewedPRs.length > 0
+    ? Math.round((prStatusCounts.approved / reviewedPRs.length) * 100) : 0;
 
   // PO status donut data
   const poStatusData = [
@@ -120,8 +129,11 @@ export default function Dashboard() {
     { name: 'Từ chối', value: prStatusCounts.rejected, fill: '#ef4444' },
   ];
 
-  const StatCard = ({ title, value, icon, color, sub, trend, trendUp }: any) => (
-    <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-all">
+  const StatCard = ({ title, value, icon, color, sub, trend, trendUp, onClick }: any) => (
+    <div 
+      onClick={onClick}
+      className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md hover:border-gray-200 transition-all cursor-pointer"
+    >
       <div className="flex items-start justify-between">
         <div className="flex-1 min-w-0">
           <p className="text-gray-500 text-xs font-medium uppercase tracking-wide mb-2">{title}</p>
@@ -145,10 +157,10 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl mb-1">Dashboard</h1>
-          <p className="text-gray-500 text-sm">Tổng quan hệ thống SCM — cập nhật thời gian thực</p>
+          <p className="text-gray-500 text-sm">Tổng quan hệ thống SCM</p>
         </div>
         <button onClick={fetchAll} className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm font-medium transition-colors">
-          <RefreshCw className="w-4 h-4" /> Làm mới
+          <RefreshCw className="w-4 h-4 animate-spin" /> Làm mới
         </button>
       </div>
 
@@ -160,6 +172,7 @@ export default function Dashboard() {
           icon={<ShoppingCart className="w-5 h-5 text-blue-600" />}
           color="bg-blue-50"
           sub={`${poStatusCounts.shipped} đang giao • ${poStatusCounts.overdue} quá hạn`}
+          onClick={() => navigate('/po')}
         />
         <StatCard
           title="Tổng Chi Tiêu"
@@ -167,6 +180,7 @@ export default function Dashboard() {
           icon={<DollarSign className="w-5 h-5 text-emerald-600" />}
           color="bg-emerald-50"
           sub={`TB ${pos.length ? formatCurrency(stats.totalSpending / pos.length) : '—'}/đơn`}
+          onClick={() => navigate('/finance/reconciliation')}
         />
         <StatCard
           title="Cảnh Báo Tồn Kho"
@@ -175,6 +189,7 @@ export default function Dashboard() {
           color="bg-amber-50"
           sub="sản phẩm dưới mức tối thiểu"
           trendUp={stats.lowStockAlerts === 0}
+          onClick={() => navigate('/warehouse/receiving', { state: { tab: 'inventory' } })}
         />
         <StatCard
           title="Chờ Duyệt"
@@ -182,18 +197,23 @@ export default function Dashboard() {
           icon={<FileCheck className="w-5 h-5 text-violet-600" />}
           color="bg-violet-50"
           sub={`${prStatusCounts.approved} đã duyệt • ${prStatusCounts.rejected} từ chối`}
+          onClick={() => navigate('/pr/approval')}
         />
       </div>
 
       {/* Rate Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
-          { label: 'Tỷ lệ hoàn thành', value: `${fulfillmentRate}%`, color: fulfillmentRate >= 70 ? 'text-green-600' : 'text-red-500', bg: 'bg-green-50', icon: <CheckCircle className="w-4 h-4 text-green-600" /> },
-          { label: 'Tỷ lệ duyệt PR', value: `${isNaN(approvalRate) ? 0 : approvalRate}%`, color: 'text-blue-600', bg: 'bg-blue-50', icon: <Activity className="w-4 h-4 text-blue-600" /> },
-          { label: 'Tổng yêu cầu', value: prs.length, color: 'text-purple-600', bg: 'bg-purple-50', icon: <BarChart2 className="w-4 h-4 text-purple-600" /> },
-          { label: 'Đơn hàng đang giao', value: poStatusCounts.shipped + poStatusCounts.confirmed, color: 'text-orange-600', bg: 'bg-orange-50', icon: <Truck className="w-4 h-4 text-orange-600" /> },
+          { label: 'Tỷ lệ hoàn thành', value: `${fulfillmentRate}%`, color: fulfillmentRate >= 70 ? 'text-green-600' : 'text-red-500', bg: 'bg-green-50', icon: <CheckCircle className="w-4 h-4 text-green-600" />, onClick: () => navigate('/po') },
+          { label: 'Tỷ lệ duyệt PR', value: `${approvalRate}%`, color: 'text-blue-600', bg: 'bg-blue-50', icon: <Activity className="w-4 h-4 text-blue-600" />, onClick: () => navigate('/pr/tracking') },
+          { label: 'Tổng yêu cầu', value: prs.length, color: 'text-purple-600', bg: 'bg-purple-50', icon: <BarChart2 className="w-4 h-4 text-purple-600" />, onClick: () => navigate('/pr/tracking') },
+          { label: 'Đơn hàng đang giao', value: poStatusCounts.shipped + poStatusCounts.confirmed, color: 'text-orange-600', bg: 'bg-orange-50', icon: <Truck className="w-4 h-4 text-orange-600" />, onClick: () => navigate('/logistics') },
         ].map((r, i) => (
-          <div key={i} className={`${r.bg} rounded-xl p-4 border border-white shadow-sm flex items-center justify-between`}>
+          <div 
+            key={i} 
+            onClick={r.onClick}
+            className={`${r.bg} rounded-xl p-4 border border-white shadow-sm flex items-center justify-between hover:shadow-md hover:border-gray-200 transition-all cursor-pointer`}
+          >
             <div>
               <p className="text-gray-500 text-xs mb-1">{r.label}</p>
               <p className={`text-2xl font-bold ${r.color}`}>{r.value}</p>

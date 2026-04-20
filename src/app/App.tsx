@@ -22,13 +22,31 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // Main App Routes Component
 function AppRoutes() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+
+  // Role-based default redirect
+  const getDefaultRoute = () => {
+    if (!user) return '/dashboard';
+    
+    switch (user.role) {
+      case 'purchasing':
+        return '/pr/tracking'; // Hoặc '/pr/create' nếu muốn tạo PR trước
+      case 'warehouse':
+        return '/warehouse/receiving';
+      case 'finance':
+        return '/finance/reconciliation';
+      case 'admin':
+      case 'manager':
+      default:
+        return '/dashboard';
+    }
+  };
 
   return (
     <Routes>
       <Route
         path="/login"
-        element={isAuthenticated ? <Navigate to="/dashboard" replace /> : <Login />}
+        element={isAuthenticated ? <Navigate to={getDefaultRoute()} replace /> : <Login />}
       />
       
       <Route
@@ -47,8 +65,8 @@ function AppRoutes() {
                 <Route path="/logistics" element={<Logistics />} />
                 <Route path="/finance/reconciliation" element={<FinanceReconciliation />} />
                 <Route path="/audit" element={<AuditLog />} />
-                <Route path="/" element={<Navigate to="/dashboard" replace />} />
-                <Route path="*" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/" element={<Navigate to={getDefaultRoute()} replace />} />
+                <Route path="*" element={<Navigate to={getDefaultRoute()} replace />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

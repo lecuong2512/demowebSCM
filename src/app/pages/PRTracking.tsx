@@ -1,15 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { api, formatDate, type PurchaseRequest } from '../services/api';
 import { ClipboardList, Search, Filter, CheckCircle, XCircle, Clock, FileText, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export default function PRTracking() {
+  const navigate = useNavigate();
   const [prs, setPrs] = useState<PurchaseRequest[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [submittingId, setSubmittingId] = useState('');
+  const [msg, setMsg] = useState('');
+  const [msgType, setMsgType] = useState<'success' | 'error'>('success');
 
   const fetchPRs = async () => {
-    setLoading(true);
+    if (prs.length === 0) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
     try {
       const data = await api.purchaseRequests.list();
       setPrs(data);
@@ -17,10 +27,31 @@ export default function PRTracking() {
       console.error(e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => { fetchPRs(); }, []);
+
+  const handleSubmitDraft = async (pr: PurchaseRequest) => {
+    if (submittingId) return;
+    setSubmittingId(pr.id);
+    setMsg('');
+    try {
+      await api.purchaseRequests.submit(pr.id);
+      setPrs((prev) => prev.map((item) => (
+        item.id === pr.id ? { ...item, status: 'pending' } : item
+      )));
+      setMsg(`Đã gửi duyệt ${pr.id} thành công`);
+      setMsgType('success');
+      fetchPRs();
+    } catch (e: any) {
+      setMsg(e.message || 'Không thể gửi duyệt yêu cầu');
+      setMsgType('error');
+    } finally {
+      setSubmittingId('');
+    }
+  };
 
   const filtered = prs.filter(pr => {
     const matchSearch = pr.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -65,9 +96,15 @@ export default function PRTracking() {
           <p className="text-gray-600">Xem trạng thái và tiến trình xử lý các yêu cầu</p>
         </div>
         <button onClick={fetchPRs} className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-sm">
-          <RefreshCw className="w-4 h-4" /> Làm mới
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Làm mới
         </button>
       </div>
+
+      {msg && (
+        <div className={`p-3 rounded-lg border text-sm ${msgType === 'error' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+          {msg}
+        </div>
+      )}
 
       {/* Summary */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -116,9 +153,13 @@ export default function PRTracking() {
           <div className="p-4 border-b border-gray-100">
             <p className="text-sm text-gray-500">Hiển thị {filtered.length} / {prs.length} yêu cầu</p>
           </div>
-          <div className="divide-y divide-gray-50">
+          <div className="divide-y divide-gray-50 max-h-[560px] overflow-y-auto">
             {filtered.map(pr => (
-              <div key={pr.id} className="p-4 hover:bg-gray-50 transition-colors">
+              <div
+                key={pr.id}
+                onClick={() => pr.status === 'draft' && navigate(`/pr/create?draftId=${pr.id}`)}
+                className={`p-4 transition-colors ${pr.status === 'draft' ? 'hover:bg-blue-50 cursor-pointer' : 'hover:bg-gray-50'}`}
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-3 flex-1">
                     {getStatusIcon(pr.status)}
@@ -135,6 +176,22 @@ export default function PRTracking() {
                         <span>Ngày: {formatDate(pr.created_date)}</span>
                         {pr.approved_by_name && <span>Duyệt bởi: {pr.approved_by_name}</span>}
                       </div>
+                      {pr.status === 'draft' && (
+                        <div className="mt-3">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSubmitDraft(pr);
+                            }}
+                            disabled={submittingId === pr.id}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium disabled:opacity-50"
+                          >
+                            {submittingId === pr.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
+                            {submittingId === pr.id ? 'Đang gửi duyệt...' : 'Gửi duyệt'}
+                          </button>
+                          <p className="text-xs text-blue-600 mt-2">Bấm vào dòng nháp để sửa trước khi gửi duyệt</p>
+                        </div>
+                      )}
                       {pr.rejection_reason && (
                         <p className="text-xs text-red-600 mt-1">Lý do từ chối: {pr.rejection_reason}</p>
                       )}

@@ -6,6 +6,8 @@ export default function POManagement() {
   const [pos, setPOs] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 10;
 
   const fetchData = async () => {
     setLoading(true);
@@ -57,6 +59,15 @@ export default function POManagement() {
     { label: 'Quá hạn', value: pos.filter(p => p.status === 'overdue').length, color: 'red' },
     { label: 'Hoàn tất', value: pos.filter(p => p.status === 'delivered').length, color: 'green' },
   ];
+  const totalPages = Math.max(1, Math.ceil(pos.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const paginatedPOs = pos.slice(startIndex, startIndex + pageSize);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
     <div className="space-y-6">
@@ -110,7 +121,7 @@ export default function POManagement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {pos.map(po => (
+                {paginatedPOs.map(po => (
                   <tr key={po.id} className="hover:bg-gray-50">
                     <td className="p-3 font-mono font-medium text-blue-600 whitespace-nowrap">{po.id}</td>
                     <td className="p-3">
@@ -141,6 +152,30 @@ export default function POManagement() {
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="border-t border-gray-100 px-4 py-3 flex items-center justify-between text-sm">
+            <span className="text-gray-500">
+              Hiển thị {pos.length === 0 ? 0 : startIndex + 1}-{Math.min(startIndex + pageSize, pos.length)} / {pos.length} đơn
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="px-3 py-1.5 rounded border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
+              >
+                Trước
+              </button>
+              <span className="text-gray-600">
+                Trang {currentPage}/{totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="px-3 py-1.5 rounded border border-gray-200 text-gray-700 disabled:opacity-50 hover:bg-gray-50"
+              >
+                Sau
+              </button>
+            </div>
           </div>
         </div>
       )}

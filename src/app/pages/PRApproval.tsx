@@ -1,6 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { api, formatCurrency, type PurchaseRequest, type Vendor } from '../services/api';
 import { CheckCircle, XCircle, RefreshCw, Star, Truck, Package } from 'lucide-react';
+
+const BRAND_KEYWORDS = [
+  'apple',
+  'samsung',
+  'sony',
+  'dell',
+  'lenovo',
+  'logitech',
+  'asus',
+  'bose',
+  'lg',
+  'chinh hang',
+  'chính hãng',
+];
+
+const normalize = (value?: string) =>
+  (value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+const getMatchedBrand = (productName: string, vendor: Vendor) => {
+  const normalizedProduct = normalize(productName);
+  const vendorContent = `${normalize(vendor.name)} ${normalize(vendor.notes)}`;
+  return BRAND_KEYWORDS.find(
+    (brand) => normalizedProduct.includes(brand) && vendorContent.includes(brand),
+  );
+};
+
+const scoreVendor = (vendor: Vendor, productName: string) => {
+  const brandMatch = getMatchedBrand(productName, vendor);
+  const officialBoost = brandMatch ? 100 : 0;
+  return officialBoost + vendor.rating * 10 + vendor.quality_score * 0.1 + vendor.on_time_delivery * 0.05;
+};
 
 export default function PRApproval() {
   const [pendingPRs, setPendingPRs] = useState<PurchaseRequest[]>([]);
@@ -11,14 +45,46 @@ export default function PRApproval() {
   const [adjustedQty, setAdjustedQty] = useState<number | ''>('');
   const [selectedVendorId, setSelectedVendorId] = useState('');
   const [unitPrice, setUnitPrice] = useState<number | ''>('');
+  const [suggestedUnitPrice, setSuggestedUnitPrice] = useState<number>(0);
   const [deliveryDays, setDeliveryDays] = useState<number>(7);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [msgType, setMsgType] = useState<'success' | 'error'>('success');
+  const vendorListRef = useRef<HTMLDivElement | null>(null);
+
+  const getBestVendor = (vendorList: Vendor[], productName: string) => {
+    if (vendorList.length === 0) return null;
+    return [...vendorList].sort((a, b) => scoreVendor(b, productName) - scoreVendor(a, productName))[0];
+  };
+
+  const sortVendors = (vendorList: Vendor[], selectedId: string, productName: string) => {
+    return [...vendorList].sort((a, b) => {
+      if (a.id === selectedId) return -1;
+      if (b.id === selectedId) return 1;
+      return scoreVendor(b, productName) - scoreVendor(a, productName);
+    });
+  };
+
+  const loadSuggestedUnitPrice = async (productId: string) => {
+    try {
+      const product = await api.products.get(productId);
+      const price = Number(product.last_price || 0);
+      setSuggestedUnitPrice(price);
+      setUnitPrice(price > 0 ? price : '');
+    } catch {
+      setSuggestedUnitPrice(0);
+      setUnitPrice('');
+    }
+  };
 
   const fetchData = async () => {
-    setLoading(true);
+    if (pendingPRs.length === 0 && !selectedPR) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
     try {
       const [prs, vends] = await Promise.all([
         api.purchaseRequests.list('pending'),
@@ -29,21 +95,28 @@ export default function PRApproval() {
       const first = prs[0] || null;
       setSelectedPR(first);
       if (first && vends.length > 0) {
-        const best = [...vends].sort((a, b) => b.rating - a.rating)[0];
-        setSelectedVendorId(best.id);
+        const best = getBestVendor(vends, first.product_name);
+        if (best) {
+          setSelectedVendorId(best.id);
+        }
+        await loadSuggestedUnitPrice(first.product_id);
+        if (vendorListRef.current) vendorListRef.current.scrollTop = 0;
+      } else {
+        setSuggestedUnitPrice(0);
         setUnitPrice('');
       }
     } catch (e: any) {
       setMsg(e.message); setMsgType('error');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
   useEffect(() => { fetchData(); }, []);
 
   // When PR changes, reset vendor & price
-  const selectPR = (pr: PurchaseRequest) => {
+  const selectPR = async (pr: PurchaseRequest) => {
     setSelectedPR(pr);
     setDecision(null);
     setMsg('');
@@ -51,19 +124,22 @@ export default function PRApproval() {
     setRejectionReason('');
     setDeliveryDays(7);
     if (vendors.length > 0) {
-      const best = [...vendors].sort((a, b) => b.rating - a.rating)[0];
-      setSelectedVendorId(best.id);
+      const best = getBestVendor(vendors, pr.product_name);
+      if (best) {
+        setSelectedVendorId(best.id);
+      }
     }
-    setUnitPrice('');
+    if (vendorListRef.current) vendorListRef.current.scrollTop = 0;
+    await loadSuggestedUnitPrice(pr.product_id);
   };
 
-  // When vendor changes, auto-fill price hint
+  // Keep selected vendor on top, keep editable unit price
   const handleVendorChange = (vid: string) => {
     setSelectedVendorId(vid);
-    setUnitPrice('');
   };
 
   const selectedVendor = vendors.find(v => v.id === selectedVendorId);
+  const sortedVendors = sortVendors(vendors, selectedVendorId, selectedPR?.product_name || '');
 
   const handleApprove = async () => {
     if (!selectedPR) return;
@@ -139,7 +215,7 @@ export default function PRApproval() {
           <p className="text-gray-600">{pendingPRs.length} yêu cầu đang chờ duyệt</p>
         </div>
         <button onClick={fetchData} className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100">
-          <RefreshCw className="w-4 h-4" /> Làm mới
+          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} /> Làm mới
         </button>
       </div>
 
@@ -149,13 +225,13 @@ export default function PRApproval() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:h-[calc(100vh-220px)]">
         {/* PR List */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col min-h-0">
           <div className="p-4 border-b border-gray-100 font-semibold text-sm text-gray-700">
             Danh sách chờ duyệt ({pendingPRs.length})
           </div>
-          <div className="divide-y divide-gray-50 max-h-[500px] overflow-y-auto">
+          <div className="divide-y divide-gray-50 overflow-y-auto flex-1 min-h-0">
             {pendingPRs.map(pr => (
               <button
                 key={pr.id}
@@ -175,7 +251,7 @@ export default function PRApproval() {
 
         {/* Detail Panel */}
         {selectedPR && (
-          <div className="lg:col-span-2 space-y-4">
+          <div className="lg:col-span-2 space-y-4 overflow-y-auto min-h-0 pr-1">
             {/* PR Info */}
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
               <div className="flex items-center gap-3 mb-4">
@@ -212,10 +288,11 @@ export default function PRApproval() {
                 <Star className="w-5 h-5 text-yellow-500" />
                 Chọn Nhà Cung Cấp *
               </h3>
-              <div className="space-y-2 mb-4 max-h-56 overflow-y-auto pr-1">
-                {vendors.map((v, i) => {
+              <div ref={vendorListRef} className="space-y-2 mb-4 max-h-56 overflow-y-auto pr-1">
+                {sortedVendors.map((v) => {
                   const isSelected = selectedVendorId === v.id;
-                  const isBest = i === [...vendors].sort((a,b) => b.rating - a.rating).findIndex(x => x.id === v.id) && v.rating === Math.max(...vendors.map(x => x.rating));
+                  const isBest = scoreVendor(v, selectedPR.product_name) === Math.max(...vendors.map((vendor) => scoreVendor(vendor, selectedPR.product_name)));
+                  const matchedBrand = getMatchedBrand(selectedPR.product_name, v);
                   return (
                     <button
                       key={v.id}
@@ -243,6 +320,8 @@ export default function PRApproval() {
                             <Star className="w-3 h-3 text-yellow-400 fill-yellow-400" />
                             <span className="font-semibold text-yellow-600">{v.rating}/5</span>
                           </div>
+                          {matchedBrand && <p className="text-emerald-600 font-medium">Hàng chính hãng ({matchedBrand})</p>}
+                          {isBest && <p className="text-blue-600 font-medium">AI ưu tiên</p>}
                           <p className="text-gray-400">Đúng hạn {v.on_time_delivery}%</p>
                           <p className="text-gray-400">Chất lượng {v.quality_score}%</p>
                         </div>
@@ -270,7 +349,7 @@ export default function PRApproval() {
                 <div>
                   <label className="block text-sm font-medium mb-1.5">
                     Số lượng
-                    <span className="text-xs text-gray-400 ml-1">(mặc định: {selectedPR.quantity})</span>
+                    <span className="text-xs text-gray-400 ml-1">({selectedPR.quantity})</span>
                   </label>
                   <input
                     type="number" min="1"
@@ -281,12 +360,19 @@ export default function PRApproval() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1.5">Đơn giá (VND)</label>
+                  <label className="block text-sm font-medium mb-1.5">
+                    Đơn giá (VND)
+                    {suggestedUnitPrice > 0 && (
+                      <span className="text-xs text-gray-400 ml-1">
+                        ({formatCurrency(suggestedUnitPrice)})
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="number" min="0"
                     value={unitPrice}
                     onChange={(e) => setUnitPrice(e.target.value ? Number(e.target.value) : '')}
-                    placeholder="Nhập đơn giá..."
+                    placeholder={suggestedUnitPrice > 0 ? String(suggestedUnitPrice) : 'Nhập đơn giá...'}
                     className="w-full p-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
                 </div>
@@ -353,7 +439,7 @@ export default function PRApproval() {
                     className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50 font-medium"
                   >
                     {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                    Duyệt & Tạo PO tự động
+                    Duyệt yêu cầu
                   </button>
                   <button
                     onClick={() => setDecision('reject')}

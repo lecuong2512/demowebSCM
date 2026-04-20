@@ -1,28 +1,97 @@
 import React, { useState, useEffect } from 'react';
-import { api, formatCurrency, type Product } from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { api, formatCurrency, type Product, type PurchaseRequest } from '../services/api';
 import { Package, AlertCircle, TrendingUp, Sparkles, Save, Send, ArrowLeft, RefreshCw } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 export default function CreatePR() {
-  const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  const draftId = query.get('draftId');
   const [products, setProducts] = useState<Product[]>([]);
+  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingProductsError, setLoadingProductsError] = useState('');
+  const [loadingDraft, setLoadingDraft] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState<number>(0);
   const [reason, setReason] = useState('');
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [msg, setMsg] = useState('');
+  const [draftData, setDraftData] = useState<PurchaseRequest | null>(null);
 
   useEffect(() => {
-    api.products.list().then(setProducts).catch(console.error);
+    let mounted = true;
+    const loadProducts = async () => {
+      setLoadingProducts(true);
+      setLoadingProductsError('');
+      try {
+        const data = await api.products.list();
+        if (!mounted) return;
+        setProducts(data);
+      } catch (e: any) {
+        if (!mounted) return;
+        setLoadingProductsError(e.message || 'Không thể tải danh sách sản phẩm');
+      } finally {
+        if (mounted) setLoadingProducts(false);
+      }
+    };
+    loadProducts();
+    return () => {
+      mounted = false;
+    };
   }, []);
+
+  useEffect(() => {
+    if (!draftId) {
+      setDraftData(null);
+      return;
+    }
+    let mounted = true;
+    const loadDraft = async () => {
+      setLoadingDraft(true);
+      try {
+        const draft = await api.purchaseRequests.get(draftId);
+        if (!mounted) return;
+        if (draft.status !== 'draft') {
+          setMsg('Yêu cầu này không còn ở trạng thái nháp');
+          setStatus('error');
+          return;
+        }
+        setDraftData(draft);
+        setQuantity(draft.quantity);
+        setReason(draft.reason);
+      } catch (e: any) {
+        if (!mounted) return;
+        setMsg(e.message || 'Không thể tải dữ liệu nháp');
+        setStatus('error');
+      } finally {
+        if (mounted) setLoadingDraft(false);
+      }
+    };
+    loadDraft();
+    return () => {
+      mounted = false;
+    };
+  }, [draftId]);
+
+  useEffect(() => {
+    if (!draftData || products.length === 0) return;
+    const product = products.find((p) => p.id === draftData.product_id) || null;
+    setSelectedProduct(product);
+  }, [draftData, products]);
 
   const handleProductChange = (productId: string) => {
     const p = products.find(x => x.id === productId) || null;
     setSelectedProduct(p);
     setQuantity(0);
   };
+
+  const currentDate = new Date().toLocaleDateString('vi-VN', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
 
   const aiSuggestion = selectedProduct
     ? Math.max(Math.max(0, selectedProduct.min_stock - selectedProduct.current_stock) + Math.ceil(selectedProduct.min_stock * 0.3), 10)
@@ -36,14 +105,25 @@ export default function CreatePR() {
     setStatus('saving');
     setMsg('');
     try {
-      await api.purchaseRequests.create({
+      const payload = {
         product_id: selectedProduct.id,
         quantity,
         reason,
         status: submitStatus,
-      });
+      };
+      if (draftId) {
+        await api.purchaseRequests.update(draftId, payload);
+      } else {
+        await api.purchaseRequests.create(payload);
+      }
       setStatus('saved');
-      setMsg(submitStatus === 'pending' ? 'Đã gửi yêu cầu duyệt thành công!' : 'Đã lưu nháp!');
+      if (draftId && submitStatus === 'pending') {
+        setMsg('Đã cập nhật nháp và gửi duyệt thành công!');
+      } else if (submitStatus === 'pending') {
+        setMsg('Đã gửi yêu cầu duyệt thành công!');
+      } else {
+        setMsg(draftId ? 'Đã cập nhật nháp!' : 'Đã lưu nháp!');
+      }
       setTimeout(() => navigate('/pr/tracking'), 1200);
     } catch (e: any) {
       setStatus('error');
@@ -58,8 +138,9 @@ export default function CreatePR() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div>
-          <h1 className="text-3xl mb-1">Tạo Yêu cầu Mua hàng</h1>
-          <p className="text-gray-600">Tạo mới Purchase Request (PR)</p>
+          <h1 className="text-3xl mb-1">{draftId ? 'Chỉnh sửa Yêu cầu Nháp' : 'Tạo Yêu cầu Mua hàng'}</h1>
+          <p className="text-gray-600">{draftId ? `Đang chỉnh sửa ${draftId}` : 'Tạo mới Purchase Request (PR)'}</p>
+          <p className="text-xs text-gray-500 mt-1">{currentDate}</p>
         </div>
       </div>
 
@@ -70,12 +151,22 @@ export default function CreatePR() {
       )}
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-6">
+        {loadingDraft && (
+          <div className="text-sm text-blue-600 flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            Đang tải dữ liệu nháp...
+          </div>
+        )}
         {/* Select Product */}
         <div>
           <label className="block mb-2 font-medium">Chọn Sản phẩm *</label>
+          {!loadingProducts && loadingProductsError && (
+            <div className="mb-2 text-sm text-red-600">{loadingProductsError}</div>
+          )}
           <select
             value={selectedProduct?.id || ''}
             onChange={(e) => handleProductChange(e.target.value)}
+            disabled={loadingProducts || !!loadingProductsError}
             className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">-- Chọn sản phẩm --</option>
@@ -122,14 +213,26 @@ export default function CreatePR() {
           <div className="bg-gradient-to-r from-purple-50 to-blue-50 border border-purple-100 rounded-lg p-4">
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="w-5 h-5 text-purple-600" />
-              <span className="font-medium text-purple-700">Đề xuất AI</span>
+              <span className="font-medium text-purple-700">Đề xuất AI thông minh</span>
+              <span className="text-xs text-gray-500 ml-auto">{currentDate}</span>
             </div>
-            <p className="text-sm text-gray-700">
-              Dựa trên tồn kho ({selectedProduct.current_stock}/{selectedProduct.min_stock}), AI khuyến nghị nhập <strong>{aiSuggestion} {selectedProduct.unit}</strong>.
-            </p>
+            <div className="space-y-2 text-sm text-gray-700">
+              <p>
+                <strong>📦 Phân tích tồn kho:</strong> Hiện tại {selectedProduct.current_stock}/{selectedProduct.min_stock} {selectedProduct.unit}
+                {selectedProduct.current_stock < selectedProduct.min_stock && (
+                  <span className="text-red-600 font-medium"> (dưới mức tối thiểu)</span>
+                )}
+              </p>
+              <p>
+                <strong>📈 Xu hướng mua hàng:</strong> AI phân tích lịch sử 3 tháng gần nhất để dự đoán nhu cầu
+              </p>
+              <p>
+                <strong>🎯 Đề xuất:</strong> Nhập <strong>{aiSuggestion} {selectedProduct.unit}</strong> để đảm bảo tồn kho an toàn (bao gồm buffer 30% và dự phòng)
+              </p>
+            </div>
             <button
               onClick={() => setQuantity(aiSuggestion)}
-              className="mt-2 text-sm text-purple-600 hover:text-purple-800 underline"
+              className="mt-3 px-3 py-1 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-md text-sm transition-colors"
             >
               Áp dụng gợi ý này
             </button>
@@ -170,19 +273,19 @@ export default function CreatePR() {
         <div className="flex gap-3 pt-2">
           <button
             onClick={() => handleSave('draft')}
-            disabled={status === 'saving'}
+            disabled={status === 'saving' || loadingDraft}
             className="flex items-center gap-2 px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors disabled:opacity-50"
           >
             {status === 'saving' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            Lưu nháp
+            {draftId ? 'Cập nhật nháp' : 'Lưu nháp'}
           </button>
           <button
             onClick={() => handleSave('pending')}
-            disabled={status === 'saving'}
+            disabled={status === 'saving' || loadingDraft}
             className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
           >
             {status === 'saving' ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Gửi duyệt
+            {draftId ? 'Cập nhật & Gửi duyệt' : 'Gửi duyệt'}
           </button>
         </div>
       </div>

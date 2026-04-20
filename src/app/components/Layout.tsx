@@ -45,7 +45,7 @@ const menuItems: MenuItem[] = [
     path: '/pr/create',
     label: 'Tạo yêu cầu mua hàng',
     icon: <FileText className="w-5 h-5" />,
-    roles: ['admin', 'purchasing', 'manager']
+    roles: ['purchasing', 'manager']
   },
   {
     path: '/pr/tracking',
@@ -73,7 +73,7 @@ const menuItems: MenuItem[] = [
   },
   {
     path: '/warehouse/receiving',
-    label: 'Nhập kho',
+    label: 'Quản lý kho',
     icon: <Package className="w-5 h-5" />,
     roles: ['admin', 'warehouse']
   },
@@ -363,23 +363,24 @@ export default function Layout({ children }: LayoutProps) {
       <aside
         className={`
           fixed top-16 left-0 bottom-0 bg-white border-r border-gray-200 z-40 transition-all duration-300
-          ${sidebarOpen ? 'w-64' : 'w-0 lg:w-16'}
+          ${sidebarOpen ? 'w-64' : 'w-0 lg:w-20'}
           ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        <nav className="p-4 space-y-1 overflow-y-auto h-full">
+        <nav className={`${sidebarOpen ? 'p-4' : 'p-2'} space-y-1 overflow-y-auto h-full`}>
           {filteredMenuItems.map((item) => (
             <Link
               key={item.path}
               to={item.path}
               onClick={() => setMobileMenuOpen(false)}
               className={`
-                flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
+                flex items-center ${sidebarOpen ? 'gap-3 px-4 justify-start' : 'px-0 justify-center'} py-3 rounded-lg transition-colors
                 ${isActive(item.path)
                   ? 'bg-blue-50 text-blue-600'
                   : 'text-gray-700 hover:bg-gray-50'
                 }
               `}
+              title={!sidebarOpen ? item.label : undefined}
             >
               {item.icon}
               <span className={`${!sidebarOpen && 'lg:hidden'}`}>
